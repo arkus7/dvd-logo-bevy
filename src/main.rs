@@ -16,7 +16,7 @@ struct Speed(f32);
 #[derive(Component)]
 struct Direction(Vec2);
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 struct WindowSize {
     width: f32,
     height: f32,
@@ -59,6 +59,18 @@ impl DvdLogoPlugin {
         windows: Res<Windows>,
         mut global_rng: ResMut<GlobalRng>,
     ) {
+        let window = windows.get_primary().unwrap();
+        let window_size = WindowSize {
+            height: window.height(),
+            width: window.width(),
+        };
+        commands.insert_resource(window_size);
+
+
+        let random_pos = Vec3::new(global_rng.f32() * window_size.width / 2.0 - LOGO_SIZE.x, global_rng.f32() * window_size.height / 2.0 - LOGO_SIZE.y, 0.0);
+
+        info!("Pos: {:?}", random_pos);
+
         commands.spawn_bundle(Camera2dBundle::default());
         commands
             .spawn()
@@ -68,14 +80,13 @@ impl DvdLogoPlugin {
             .insert(RngComponent::from(&mut global_rng))
             .insert_bundle(SpriteBundle {
                 texture: asset_server.load("dvd.png"),
+                transform: Transform {
+                    translation: random_pos,
+                    ..default()
+                },
                 ..default()
             });
 
-        let window = windows.get_primary().unwrap();
-        commands.insert_resource(WindowSize {
-            height: window.height(),
-            width: window.width(),
-        });
 
         let collision_sound = asset_server.load("sounds/meow.ogg");
         commands.insert_resource(CollisionSound(collision_sound));
