@@ -1,3 +1,5 @@
+#![allow(clippy::type_complexity)]
+
 use bevy::{prelude::*, time::FixedTimestep};
 use bevy_turborand::*;
 
@@ -20,6 +22,11 @@ struct WindowSize {
     height: f32,
 }
 
+#[derive(Debug, Default)]
+struct CollisionEvent;
+
+struct CollisionSound(Handle<AudioSource>);
+
 fn main() {
     App::new()
         .add_plugins(DefaultPlugins)
@@ -33,12 +40,14 @@ impl Plugin for DvdLogoPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugin(RngPlugin::default())
             .add_startup_system(DvdLogoPlugin::setup)
+            .add_event::<CollisionEvent>()
             .add_system_set(
                 SystemSet::new()
                     .with_run_criteria(FixedTimestep::step(TIME_STEP as f64))
                     .with_system(DvdLogoPlugin::apply_speed)
                     .with_system(DvdLogoPlugin::bounce)
-                    .with_system(DvdLogoPlugin::change_color),
+                    .with_system(DvdLogoPlugin::change_color)
+                    .with_system(DvdLogoPlugin::play_collision_sound),
             );
     }
 }
@@ -59,14 +68,6 @@ impl DvdLogoPlugin {
             .insert(RngComponent::from(&mut global_rng))
             .insert_bundle(SpriteBundle {
                 texture: asset_server.load("dvd.png"),
-                transform: Transform {
-                    translation: Vec3::new(0.0, 0.0, 0.0),
-                    ..default()
-                },
-                sprite: Sprite {
-                    color: Color::ANTIQUE_WHITE,
-                    ..Default::default()
-                },
                 ..default()
             });
 
@@ -74,7 +75,10 @@ impl DvdLogoPlugin {
         commands.insert_resource(WindowSize {
             height: window.height(),
             width: window.width(),
-        })
+        });
+
+        let collision_sound = asset_server.load("sounds/meow.ogg");
+        commands.insert_resource(CollisionSound(collision_sound));
     }
 
     fn apply_speed(mut query: Query<(&mut Transform, &Speed, &Direction)>) {
@@ -96,10 +100,10 @@ impl DvdLogoPlugin {
     fn bounce(
         window_size: Res<WindowSize>,
         mut logo_query: Query<(&mut Transform, &mut Direction), With<DvdLogo>>,
+        mut collision_events: EventWriter<CollisionEvent>,
     ) {
         let (transform, mut direction) = logo_query.single_mut();
         let (x, y) = (transform.translation.x, transform.translation.y);
-
 
         let right_bound = window_size.width / 2.0 - LOGO_SIZE.x / 2.0;
         let left_bound = -right_bound;
@@ -107,11 +111,34 @@ impl DvdLogoPlugin {
         let top_bound = window_size.height / 2.0 - LOGO_SIZE.y / 2.0;
         let bottom_bound = -top_bound;
 
-        if x >= right_bound || x <= left_bound {
-            direction.0.x *= -1.0;
+        let bounce_horizontally = x >= right_bound || x <= left_bound;
+        let bounce_vertically = y >= top_bound || y <= bottom_bound;
+
+        match (bounce_horizontally, bounce_vertically) {
+            (true, true) => {
+                direction.0 *= -1.0;
+                collision_events.send_default();
+            }
+            (true, _) => {
+                direction.0.x *= -1.0;
+            }
+            (_, true) => {
+                direction.0.y *= -1.0;
+            }
+            _ => {}
         }
-        if y >= top_bound || y <= bottom_bound {
-            direction.0.y *= -1.0;
+    }
+
+    fn play_collision_sound(
+        collision_events: EventReader<CollisionEvent>,
+        audio: Res<Audio>,
+        sound: Res<CollisionSound>,
+    ) {
+        // Play a sound once per frame if a collision for both axis occurred.
+        if !collision_events.is_empty() {
+            // This prevents events staying active on the next frame.
+            collision_events.clear();
+            audio.play(sound.0.clone());
         }
     }
 }
